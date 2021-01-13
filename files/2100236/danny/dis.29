@@ -1,0 +1,441 @@
+;2500 console program
+(AND  (SETQ DIS '(
+
+(&  input format )
+(&    normally all characters coming in at the interface port are displayed on the )
+(&    text screen commands to the computer are prefaced by a control q 21 octal )
+
+(&  general commands )
+
+	(CALL 017  flag-chr		& means that next char is command )
+
+	(CALL 040  nop-chr		& just go back to text mode without any action )
+	(CALL 041  boot-chr		& initialzes bootstrap load )
+	(CALL 042  reset-chr		& intiialize program )
+	(CALL 043  cs-chr		& clears the display list )
+
+
+(&   characters betwixt 100 and 137 octal inclusive ariving after a control q will )
+(&   be expected in groups of three The 5 least significant bits of these 3 chrs will )
+(&   be cons up into a 15 bit display list instruction  last chr is least significant )
+(&   this display instruction is added to the top of the display list )
+
+(&  op codes are as follows )
+
+(&   000xx xxxxx xxxxx		error )
+(&   00001 00xxx xxxxx		home )
+(&   00010 10xxx xxxxx		penup )
+(&   00010 01xxx xxxxx		endsnap )
+(&   00010 11xxx xxxxx		pendown )
+(&   00011 00xxx xxxxx		showturtle )
+(&   00011 01xxx xxxxx		hideturtle )
+(&   00011 10xxx xxxxx		blink )
+(&   00011 11xxx xxxxx		unblink )
+(&   0010d ddddd ddddd		forward   distance )
+(&   0011d ddddd ddddd		back   distance )
+(&   0100a aaaaa aaaaa		left   angle )
+(&   0101a aaaaa aaaaa		right   angle )
+(&   0110h hhhhh hhhhh		setheading   heading )
+(&   0111s sssss sssss		move   speed )
+(&   1000s sssss sssss		spin   speed )
+(&   1001s sssss sssss		unmove   speed )
+(&   1010s sssss sssss		unspin   speed )
+(&   1011a aaaaa aaaaa		display   address )
+(&   1100m mmmmm mmmmm		blink   mask )
+(&   1101p ppppp ppppp		dot   pattern )
+(&   1110r rrrrr rrrrr		circle   radius )
+
+
+
+
+
+(&  register allocation )
+
+	(CALL 2  xpos 	& lsb's of x position )
+	(CALL 3  ypos 	& lsb's of y position )
+	(CALL 4  cos 		& cosine of heading )
+	(CALL 5  sin 		& sine of heading )
+	(CALL 6  heading 	& heading of turtle )
+	(CALL 7  pc 		& pointer to display list instrution being executed )
+
+(&  scratch pad allocation )
+
+	(CALL 32  clock 		& time incremented every clock cycle )
+	(CALL 33  in-buffer 		& communications link input buffer pointer )
+	(CALL 34  out-buffer  		& communications link output buffer pointer )
+	(CALL 35  display-top 		& top of display list )
+	(CALL 36  pen-state 		& zero if down minus one if up )
+	(CALL 37  turtle-state 	& zero if turtle is hidden else minus one )
+	(CALL 40  scratch 		& never trust a subr to leave this one alone )
+	(CALL 41  sav0 		& for saving register 0 during interupts )
+	(CALL 42  sav1 		& for saving register 1 during interupts )
+	(CALL 43  sav2 		& for saving register 2 during interupts )
+	(CALL 44  sav3 		& for saving register 3 during interupts )
+	(CALL 45  sav4 		& for saving register 4 during interupts )
+	(CALL 46  sav5 		& for saving register 5 during interupts )
+	(CALL 47  sav6 		& for saving register 6 during interupts )
+	(CALL 50  sav7 		& for saving register 7 during interupts )
+	(CALL 51  spin-angle 		& just like clock mod 360 )
+	(CALL 52  back-scratch 	& not for scratching backs but for back's scratching )
+
+
+(&  main loop of the display program )
+
+
+wait		(pushj	check-interupt )
+		(pushj   check-flag )
+		(get	0 in-buffer	& check if there are characters in the buffer )
+		(subi   0 in-buffer-start )
+		(bne	serv-in-buffer )
+		(jump	wait )
+
+
+
+check-interupt	(bis	serv-interupt )
+		(popj )
+
+serv-interupt	(dis	ints 3 0)
+		(error			& interupt went away )
+		(jump	serv-text	& textdisplay is 1 )
+		(jump	serv-in		& character coming in on interface )
+		(jump	serv-in		& interface has priority )
+
+
+check-flag	(bfs	serv-flag )
+		(popj )
+
+serv-flag	(dis	flags 7 0 )
+		(error			& flag went away )
+		(jump	serv-key	& keyboard is 1 )
+		(jump	serv-out	& output to interface is 2 )
+		(jump 	serv-key	& keyboard has priority )
+		(jump	serv-clock	& real time clock is 3 )
+		(jump 	serv-key	& keyboard has priority so you don't get hung )
+		(jump 	serv-key	& keyboard has priority so you don't get hung )
+		(jump 	serv-key	& keyboard has priority so you don't get hung )
+
+
+serv-clock	(clearclock		& turn off flag )
+		(get	0 clock		& increment clock )
+		(inc	0 )
+		(put	0 clock )
+		(get	0 spin-angle	& update spin-angle )
+		(lod	1 360.		 )
+		(pushj	normalize )
+		(jump 	refresh		& refesh display			 )
+
+
+serv-in		(get	0 in		& raed the character )
+		(get	1 in-buffer	& get the buffer address )
+		(iwrite	1 0		& store and increment address )
+		(put	1 in-buffer )
+		(popj			& all interupts are subrs )
+
+
+serv-key	(get	0 key		& read the character )
+		(get	1 out-buffer	& put it in the output buffer )
+		(iwrite	1 0 )
+		(put	1 out-buffer )
+		(popj			& all interupts are subrs )
+
+
+serv-out	(get	1 out-buffer )
+		(read	1 0 )
+		(put	0 out		& send out the character )
+		(inc	1 )
+		(put	1 out-buffer )
+		(popj			& all interupts are subrs )
+
+
+(&  refresh - once every 60th of a sec )
+
+refresh		(lod	pc display-list-start )
+next		(pushj	check-interupt	& before doing anything )
+		(iread	pc 0		& inc pointer and get instuction )
+		(get	1 display-top )
+		(sub	1 pc		& are we done )
+		(beq	turtle		& yes draw turtle )
+		(pushj	dispatch	& so that all is subr's )
+		(jump	next )
+
+turtle		(get	1 turtle-state	& this draws a triangular turtle )
+		(beq	pop-place )
+		(lod	0 90. )
+		(pushj	right )
+		(lod	0 7. )
+		(pushj	forward )
+		(lod	0 135. )
+		(pushj	right )
+		(lod	0 10. )
+		(pushj	forward )
+		(lod	0 90. )
+		(pushj	right )
+		(lod	0 10. )
+		(pushj	forward )
+		(lod	0 135. )
+		(pushj	right )
+		(lod	0 7. )
+		(pushj	forward )
+		(lod	0 90. )
+		(jump	left )
+
+
+dispatch	(rot	0 15		& must look at the right left  bits )
+		(dis	bus 15	0	& display list op codes )
+		(error			& 0 )
+		(jump	special		& 1 )
+		(jump	forward		& 2 )
+		(jump	back		& 3 )
+		(jump	left		& 4 )
+		(jump	right		& 5 )
+		(jump	setheading	& 6 )
+		(jump	move		& 7 )
+		(jump	spin		& 8 )
+		(jump	unmove		& 9 )
+		(jump	unspin		& 10 )
+		(jump	display		& 11 )
+		(blink			& 12 )
+		(dot			& 13 )
+		(error			& 14 )
+		(error			& 15 )
+special		(rot	0 12		& look at next most sig bits )
+		(dis	bus 7 0		& special display list op codes )
+		(error			& 0 )
+		(jump	home		& 1 )
+		(jump	penup		& 2 )
+		(jump	pendown		& 3 )
+		(jump	showturtle	& 4 )
+		(jump	hideturtle	& 5 )
+		(jump	endsnap		& 6 )
+		(error			& 7 )
+
+(&  display list instructions )
+(&  special instruntions first )
+
+home		(pushj center )
+		(minus 0 0 )
+		(jump setheading )
+
+penup		(penu			& do it and store it )
+		(lod	1 177777	& minus one means pen is up )
+		(put	1 pen-state )
+		(popj )
+
+pendown		(pend			& do and store it )
+		(sub	1 1		& zero means pen is down )
+		(put	1 pen-state )
+		(popj		 )
+
+showturtle	(lod	1 177777	& minus one means turtle is on )
+		(put	1 turtle-state )
+		(popj )
+
+hideturtle	(sub	1 1		& zero means turtle is hidden )
+		(put	1 turtle-state )
+		(popj		 )
+
+
+
+endsnap		(get	1 snap-stack	& this is a macro popj )
+		(dec	1 )
+		(put	1 snap-stack )
+		(read	1 pc )
+		(popj )
+
+(&  display list macro instructions )
+
+forward		(pushj	getarg		& get signed arg )
+		(get	0 0 )
+		(bpl	fd		& but unless it is positive )
+		(pushj	complement )
+		(jump	back		& go backwards )
+fd		(rot	0 1		& times 2 )
+continue-fd	(draw	0		& magic vector instruction )
+		(add	2 4		& and it's helper )
+		(jumpw	wrap		& if the magic instruction set the bit we wrap )
+		(popj )
+wrap		(penu			& we get here if the turtle went off the screen )
+		(lod	0 wrap-delay		 )
+wrap-loop	(pushj	check-interupts	& kill enough time for the turtle to get around )
+		(dec	0 )
+		(bpl	wrap-loop )
+		(get	0 xcor		& so we can see if it wraps again )
+		(andi	0 777		& it should be just nine bits )
+		(put	0 xcor )
+		(get	0 ycor )
+		(andi	0 777 )
+		(put	0 ycor )
+		(jump	restore-pen )
+
+
+back		(put	0 back-scratch	& save the macro command )
+		(lod	0 180. )
+		(pushj	right		& this must not use back-scratch )
+		(get	0 back-scratch )
+		(pushj	forward )
+		(lod	0 180. )
+		(jump	right )
+
+
+left		(pushj	getarg		& left is minus right )
+lt		(sub	heading 0	& jump here if you have you arg in zero )
+		(put	0 heading )
+		(jump	seth )
+
+right		(pushj	getarg		& get signed argument )
+rt 		(add	0 heading	& jump here if you have you arg in zero )
+		(jump	seth )
+
+setheading	(pushj	getarg		& leave signed argument in zero )
+seth		(lod 	1 360.		& pushj to here iff arg is already in zero )
+		(pushj	normlize	& normalize to -1 > x > 360 )
+		(put	heading 0 )
+		(jump	trig-lookup	& get sin and cos  )
+
+(&  move )
+
+
+
+
+spin		(pushj	getarg )
+		(put	1 spin-angle	& just a time dependent right )
+		(pushj	pos-multiply )
+		(jump	rt )
+
+
+(&  unmove )
+
+
+
+
+
+unspin		(pushj	getarg )
+		(put	1 spin-angle	& just a time dependent left )
+		(pushj	pos-multiply )
+		(jump	lt )
+
+(&  display )
+
+
+
+(&  blink )
+
+
+(&  dot )
+
+
+(&  utility subrs )
+
+pos-multiply	(put	2 scratch	& pos num in 1 times num in 0 to 0 )
+		(lod	2 177760	& minus sixteen )
+		(put	2 er		& we use the ir to iterate 16 times )
+		(sub	2 2		& result will appear here )
+pos-mult-loop	(add	1 1		& reg one must be positive )
+		(addc	2 0		& reg zero can be either )
+		(add	2 2		& left shift )
+		(binc	pos-mult-loop )
+		(put	0 2		& 16 bit result in 0 )
+		(put	2 scratch	& only the ir is messed up )
+		(popj )
+
+
+restore-pen	(get	1 pen-state	& sets pen to what pen state says )
+		(penu )
+		(bmi	pop-place )
+		(pend )
+		(popj )
+
+center		(penup			& put turtle in center of screen )
+		(lod	1 255.		& center of screen )
+		(put	1 xcor )
+		(put	1 ycor )
+		(add	xpos ypos	& wait for it to get to the center )
+		(nor	xpos xpos )
+		(put	xpos er )
+centerloop	(binc	centerloop	& the world's tightest loop )
+		(jump	restore-pen )
+
+getarg		(rot	0 1		& because dispatch left it in a bad state )
+		(andi	0 777		& extracts signed arg from 0 )
+		(rot	0 11		& this is how we extend the sign bit )
+		(ars	0 2 )
+		(ars	0 3 )
+pop-place	(popj			& pop-place can be any popj for branching to )
+
+normlize	(get	0 0		& normalizes -1 < contents of 0 < contents of 1 )
+		(bpl	too-high )
+		(add	0 1 )
+		(jump	normalize	& keep adding reg 1 until it is positive )
+too-high	(sub	0 1		& done like this to save registers )
+		(bpl	too-high )
+		(add	0 1 )
+		(popj )
+
+save-stuff	(put	0 sav0		& put working registers into scratch pad )
+		(put	1 sav1 )
+		(put	2 sav2 )
+		(put	3 sav3 )
+		(put	4 sav4 )
+		(put	5 sav5 )
+		(put	6 sav6 )
+		(put	7 sav7 )
+		(popj )
+
+restore-stuff	(get	0 sav0		& get working registers from scratch pad )
+		(get	1 sav1 )
+		(get	2 sav2 )
+		(get	3 sav3 )
+		(get	4 sav4 )
+		(get	5 sav5 )
+		(get	6 sav6 )
+		(get	7 sav7 )
+		(popj )
+
+
+
+trig-lookup	(put	1 heading	& finds sin and cos of heading )
+		(lod	0 90.		& from 90 word sine table )
+		(sub	1 0		& which quadrant? )
+		(bmi	quad1 )
+		(sub	1 0 )
+		(bmi	quad2 )
+		(sub	1 0 )
+		(bmi	quad3 )
+		(sub	1 0 )
+		(bmi	quad4 )
+		(error			& heading is not less than 360 )
+
+quad1		(pushj	gettrig		& this will get the right magintudes )
+		(add	sin 0		& but they need to be sorted with )
+		(add	cos 1		& reagard to sign and phase )
+		(popj )
+quad2		(pushj	gettrig )
+		(add	sin 1 )
+		(sub	cos 0 )
+		(popj )
+quad3		(pushj	gettrig )
+		(sub	sin 0 )
+		(sub	cos 1 )
+		(popj )
+quad4		(pushj	gettrig )
+		(sub	sin 1 )
+		(add	cos 0 )
+		(popj )
+
+gettrig		(add	1 0		& just to get things positive )
+		(lod	0 trig-table-start )
+		(add	0 1 )
+		(read	0 4		& gets the function with positive derivative )
+		(lod	0 trig-table-end )
+		(sub	0 1 )
+		(read	0 5		& fuction with minus derivative )
+		(put	0 4		& pos slope )
+		(put	1 5		& neg slope )
+		(sub	sin sin )
+		(sub	cos cos )
+		(popj )
+
+)) T )  
+
+
+
