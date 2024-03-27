@@ -1,0 +1,12 @@
+
+
+
+CHANGE "HIGH" on 2d10-13+ to "GND"
+
+
+SHIFT-BUS-H is unused signal; use AND instead of NAND for
+SHIFT-BUS-P to eliminate unnecessary inverter.
+
+exchange FRAME and FRAME-N on TV counter change to remove
+interlace bug!!
+

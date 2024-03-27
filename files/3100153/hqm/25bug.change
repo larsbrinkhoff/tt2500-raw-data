@@ -1,0 +1,17 @@
+ 25 change
+ remove 1d24-1 1c19-7
+	1d24-1 1e11-1
+ add	1c22-2 1c19-7 1e11-1
+	1d24-1 1c22-4
+	1e24-2 1c22-3
+
+ remove	1d01-11 1b1-10
+	1d01-11 1bj1-04
+ add	1d01-11 1b1-10
+	1d01-10 1bj1-04
+
+ remove	1d01-15 1b01-14
+ add	1b01-14 1fj2-13
+
+ SERVE may be wored to 1b11-12 instead of 1b11-11
+
